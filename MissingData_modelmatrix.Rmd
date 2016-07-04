@@ -1,0 +1,131 @@
+---
+title: "Handling Missing Data and model.matrix (useful for logistic regression)"
+author: "Francia Moscoso"
+date: "July 4, 2016"
+output: html_document
+---
+<br>
+```{r LoadLib, message=F, warning=F}
+library(tidyr)
+library(dplyr)
+  
+setwd("~/SprintboardProject/Missing_Data")
+```
+<br>
+<br>
+**Read patients file**
+```{r comment="", echo=TRUE}
+#Load the Info
+patients <- read.csv("./DataSets/dt_simulated.csv", header=TRUE, sep=",")
+
+```
+<br>
+<br>
+**Exploring patients file**
+```{r comment="", echo=TRUE}
+str(patients)
+head(patients)
+
+#No missing values
+sapply(patients, function(x) sum(is.na(x)))
+```
+<br>
+```{r comment="", echo=TRUE}
+patientsORG <-  patients
+
+dim(patients)
+
+# Adding Missing Values
+set.seed(10)
+patients[sample(1:nrow(patients), 20), "Cholesterol"] <- NA
+patients[sample(1:nrow(patients), 20), "Smoking"] <- NA
+patients[sample(1:nrow(patients), 22), "Education"] <- NA
+patients[sample(1:nrow(patients), 5), "Age"] <- NA
+patients[sample(1:nrow(patients), 5), "BMI"] <- NA
+
+# Show missing values
+sapply(patients, function(x) sum(is.na(x)))
+
+```
+
+<br>
+<br>
+*Set factors*
+```{r comment="", echo=TRUE}
+patients <- patients %>%
+    mutate(Smoking = as.factor(Smoking)) %>% 
+    mutate(Education = as.factor(Education)) %>% 
+    mutate(Cholesterol = as.numeric(Cholesterol))
+
+#Verify
+str(patients)
+```
+<br>
+<br>
+**Imputation**
+```{r comment="", echo=TRUE}
+#Now that the dataset is ready for imputation, we will call the mice package. The code below is standard and you dont need to change anything besides the dataset name.
+library(mice)
+init = mice(patients, maxit=0) 
+meth = init$method
+predM = init$predictorMatrix
+
+#select the BMI variable to not be included as predictor during imputation.
+predM[, c("BMI")]=0
+
+#Skip a variable from imputation but this variable will be used for prediction.
+# It means that the na values from column 'Age' won't be imputed(predicted).
+meth[c("Age")]=""  
+
+#Now let specify the methods for imputing the missing values. There are specific methods for continues, binary and ordinal variables. I set different methods for each variable. You can add more than one variable in each methods.
+meth[c("Cholesterol")]="norm" 
+meth[c("Smoking")]="logreg" 
+meth[c("Education")]="polyreg"
+
+# Run the multiple (m=5) imputation.
+set.seed(103)
+imputed = mice(patients, method=meth, predictorMatrix=predM, m=5)
+
+#Create a dataset after imputation.
+imputed <- complete(imputed)
+#Check for missings in the imputed dataset. Only 'Age' was requested not to be imputed.
+sapply(imputed, function(x) sum(is.na(x)))
+```
+<br>
+<br>
+**Accurary**
+In this example, we know the actual values of missing data, since I added the missings. This indicate that we can check the accuracy of the imputation. However, we should acknowledge that this is an simulated dataset, and therefore, variables have no scientific meanings and are not correlated to each other. 
+```{r comment="", echo=TRUE}
+# Cholesterol
+actual <- patientsORG$Cholesterol[is.na(patients$Cholesterol)]
+predicted <- imputed$Cholesterol[is.na(patients$Cholesterol)]
+mean(actual)
+mean(predicted)
+ 
+# Smoking
+actual <- patientsORG$Smoking[is.na(patients$Smoking)] 
+predicted <- imputed$Smoking[is.na(patients$Smoking)] 
+table(actual)
+table(predicted)
+```
+<br>
+<br>
+**model.matrix: Useful for logistic regression. Be sure to convert as.factor the desired variables to be converted to dummy variables**
+```{r comment="", echo=TRUE}
+
+d <- data.frame(x=c('a','b','c'),y=c(1,2,3), f=c(8,9,10))
+str(d)
+# y and f are not factors so no dummy variables are created
+print(model.matrix(~0+x+y+f,data=d))
+
+
+# Eliminate intercept (~0),  
+d <- data.frame(x=c('a','b','c', 'e'),y=c('1','2','3','4'), f=c('8','9','7','8'))
+str(d)
+# y and f are factors so dummy variables are created. We are not including 'x' this time
+print(model.matrix(~0+y+f,data=d))
+
+```
+
+<br>
+<br>
